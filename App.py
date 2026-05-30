@@ -3,34 +3,24 @@ import yfinance as yf
 import pandas as pd
 
 st.set_page_config(layout="wide")
-st.title("📊 Custom Wall Street Analyst Dashboard")
-st.write("Type any US stock ticker below to pull real-time analyst recommendations and company data.")
+st.title("📊 Social Trends & Wall Street Analyst Dashboard")
 
-# 1. Text input field instead of a drop-down selection
-# .strip().upper() cleans up spaces and forces uppercase formatting
-user_input = st.text_input("Enter Stock Ticker (e.g., NVDA, AAPL, TSLA):", "NVDA")
-selected_ticker = user_input.strip().upper()
+social_trending_stocks = ["NVDA", "TSLA", "AAPL", "AMD", "MSFT"]
+selected_ticker = st.sidebar.selectbox("Select a Trending Stock to Inspect", social_trending_stocks)
 
-# Only run the data pipeline if the user has typed something in
 if selected_ticker:
     stock = yf.Ticker(selected_ticker)
     
     # --- Existing Data Fetching Block ---
     try:
         info = stock.info
-        
-        # If yfinance can't find a valid company name, the ticker likely doesn't exist
-        if not info or "longName" not in info:
-            st.error(f"Could not find any data for ticker '{selected_ticker}'. Please check the spelling and try again.")
-            st.stop()
-            
         company_name = info.get("longName", selected_ticker)
         summary = info.get("longBusinessSummary", "No description available.")
         current_rec = info.get("recommendationKey", "N/A").upper()
         target_price = info.get("targetMeanPrice", "N/A")
         current_price = info.get("currentPrice", "N/A")
-    except Exception as e:
-        st.error(f"Error retrieving data for '{selected_ticker}'. The ticker might be invalid or delisted.")
+    except:
+        st.error("Error retrieving core stock information.")
         st.stop()
 
     col1, col2 = st.columns([2, 1])
@@ -46,15 +36,26 @@ if selected_ticker:
 
     st.markdown("---")
     
-    # --- Upgrades and Downgrades Table ---
+    # --- NEW: Upgrades and Downgrades Table ---
     st.subheader("🔄 Recent Analyst Upgrades & Downgrades")
     try:
+        # Fetch the dataframe from yfinance
         ud_df = stock.get_upgrades_downgrades()
+        
         if ud_df is not None and not ud_df.empty:
+            # Reset index so 'Grade Date' becomes a regular visible column
             ud_df = ud_df.reset_index()
+            
+            # Clean up the column names for a polished display
             ud_df.columns = ["Grade Date", "Firm", "To Grade", "From Grade", "Action"]
+            
+            # Convert date column to a clean date format (removing timezone/hours)
             ud_df["Grade Date"] = pd.to_datetime(ud_df["Grade Date"]).dt.date
+            
+            # Sort with the newest analyst actions at the very top
             ud_df = ud_df.sort_values(by="Grade Date", ascending=False)
+            
+            # Display the top 10 most recent updates
             st.dataframe(ud_df.head(10), use_container_width=True, hide_index=True)
         else:
             st.info("No recent upgrade/downgrade history available for this stock.")
@@ -63,7 +64,7 @@ if selected_ticker:
 
     st.markdown("---")
     
-    # --- Institutional Investors Block ---
+    # --- Existing Institutional Investors Block ---
     st.subheader("🐋 Top 5 Institutional Investors")
     try:
         holders_df = stock.institutional_holders
@@ -74,5 +75,3 @@ if selected_ticker:
             st.write("No institutional holder data found.")
     except:
         st.write("Institutional investors currently unavailable.")
-else:
-    st.info("Please enter a stock ticker above to get started.")
