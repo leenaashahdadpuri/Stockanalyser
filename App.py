@@ -72,14 +72,85 @@ if selected_ticker and api_token:
             
     st.markdown("---")
     
-    # ==================== THE 3 NEW EXPLICIT SECTIONS ====================
+    # ==================== THE 3 EXPLICIT SECTIONS ====================
     
     # --- SECTION 1: WHAT THE COMPANY DOES & STAKEHOLDER STRUCTURE ---
     st.header("1. 🏢 Business Operations & Capital Structure")
     
-    # Check if a custom landing page or ticker description is available from Finnhub profile metadata
     web_url = profile_res.get("weburl", "N/A")
     exchange = profile_res.get("exchange", "N/A")
     ipo_date = profile_res.get("ipo", "N/A")
     
-    st.write(f"**{company_name}** operates as a major company within the **{industry}** sector. The equity is listed primarily on the **{exchange}** exchange network,
+    # FIXED: Replaced single quotes with triple quotes to cleanly support multiline text block outputs
+    st.write(f"""
+    **{company_name}** operates as a major enterprise within the **{industry}** market space. 
+    The company equity is listed primarily on the **{exchange}** exchange network, tracking public trading 
+    records since its initial market debut on **{ipo_date}**.
+    """)
+    st.write(f"🌐 **Official Corporate Portal:** [{web_url}]({web_url})")
+    
+    # Capital structure context block
+    st.subheader("🐋 Market Foothold & Share Allocation Summary")
+    ownership_data = {
+        "Market Capitalization Valuation": [f"${mkt_cap:,.2f} Million"],
+        "Total Shares Outstanding": [f"{shares_outstanding:,.2f}M Shares"],
+        "Reporting Currency Code": [profile_res.get("currency", "USD")],
+        "Base Corporate Region": [profile_res.get("country", "US")]
+    }
+    st.dataframe(pd.DataFrame(ownership_data), use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    
+    # --- SECTION 2: BUY OR SELL RECOMMENDATION BREAKDOWN ---
+    st.header("2. 📊 Wall Street Recommendation Trends")
+    
+    if isinstance(rec_res, list) and len(rec_res) > 0:
+        latest_rec = rec_res[0]
+        period = latest_rec.get("period", "Current")
+        
+        strong_buy = latest_rec.get("strongBuy", 0)
+        buy = latest_rec.get("buy", 0)
+        hold = latest_rec.get("hold", 0)
+        sell = latest_rec.get("sell", 0)
+        strong_sell = latest_rec.get("strongSell", 0)
+        
+        st.write(f"Consensus metrics tracking Wall Street analyst targets for the statement cycle (**{period}**):")
+        
+        m_col1, m_col2, m_col3, m_col4, m_col5 = st.columns(5)
+        m_col1.metric("🟢 Strong Buy", strong_buy)
+        m_col2.metric("🌱 Buy", buy)
+        m_col3.metric("🟡 Hold", hold)
+        m_col4.metric("🚨 Sell", sell)
+        m_col5.metric("❌ Strong Sell", strong_sell)
+        
+        rec_chart_data = pd.DataFrame({
+            "Rating Class": ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"],
+            "Analyst Vote Counts": [strong_buy, buy, hold, sell, strong_sell]
+        }).set_index("Rating Class")
+        st.bar_chart(rec_chart_data)
+    else:
+        st.info("Analyst consensus targets are clearing cache channels for this ticker.")
+        
+    st.markdown("---")
+    
+    # --- SECTION 3: TOP NEWS / LATEST UPDATES ---
+    st.header("3. 📰 Latest Corporate Headlines & Market Updates")
+    
+    if isinstance(news_res, list) and len(news_res) > 0:
+        for article in news_res[:5]:
+            headline = article.get("headline", "No Headline Available")
+            source = article.get("source", "Market News")
+            summary_text = article.get("summary", "")
+            url = article.get("url", "#")
+            
+            st.subheader(f"• {headline}")
+            st.caption(f"Source: **{source}**")
+            if summary_text:
+                st.write(summary_text)
+            st.markdown(f"🔗 [Read Full Coverage]({url})")
+            st.markdown("<br>", unsafe_allow_html=True)
+    else:
+        st.info("No mainstream headlines published for this ticker over the trailing 7 days.")
+        
+elif not api_token:
+    st.info("🔑 Please enter your Finnhub API Token above to boot your live tracking analytics framework.")
