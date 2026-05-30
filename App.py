@@ -16,16 +16,20 @@ with col_input2:
     api_key = st.text_input("Enter FinancialModelingPrep (FMP) API Key:", type="password")
 
 # Cached Data Function to save your API keys and calls in local browser memory
-@st.cache_data(ttl=1800, show_spinner="Loading global financial metrics...")
+@st.cache_data(ttl=600, show_spinner="Loading global financial metrics...")
 def fetch_fmp_data(ticker, key):
-    # Endpoint 1: Profile contains descriptions, price, margins, and institutional stakes
+    # Standardized endpoint paths for FMP free-tier accounts
     profile_url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={key}"
-    # Endpoint 2: Core historical daily pricing back to inception
-    history_url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?serietype=line&apikey={key}"
+    history_url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?apikey={key}"
+    
+    # Custom headers mimicking a desktop user browser to prevent cloud server filtering
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
     try:
-        p_res = requests.get(profile_url).json()
-        h_res = requests.get(history_url).json()
+        p_res = requests.get(profile_url, headers=headers).json()
+        h_res = requests.get(history_url, headers=headers).json()
         return p_res, h_res
     except Exception as e:
         return None, None
@@ -34,18 +38,23 @@ def fetch_fmp_data(ticker, key):
 if selected_ticker and api_key:
     profile_data, history_data = fetch_fmp_data(selected_ticker, api_key)
     
-    # 🛠️ BULLETPROOF GUARDRAIL: Pre-initialize an empty fallback dictionary
+    # Check if FMP explicitly returned a system error or invalid key warning
+    if isinstance(profile_data, dict) and "Error Message" in profile_data:
+        st.error(f"❌ API Error: {profile_data.get('Error Message')}")
+        st.stop()
+        
     profile = {}
     
     # Safely extract the profile dictionary ONLY if it is a list with elements inside
     if isinstance(profile_data, list) and len(profile_data) > 0:
         profile = profile_data[0]
     else:
-        st.error(f"⚠️ Could not pull records for '{selected_ticker}'.")
-        st.info("💡 **Why this happens:** \n"
-                "1. Your FMP API key might be mistyped, inactive, or expired.\n"
-                "2. The ticker requested might require a paid FMP tier. Try testing common default tickers like **NVDA**, **AAPL**, or **TSLA** to verify if your key is working.")
-        st.stop() # Stops execution right here to prevent downstream crashes!
+        st.error(f"⚠️ Could not pull profile records for '{selected_ticker}'.")
+        # RAW DEBUG BLOCK: Prints out exactly what the server said to find the root cause
+        with st.expander("🔍 Click to view raw server response debug info"):
+            st.write("Profile Response:", profile_data)
+            st.write("History Response:", history_data)
+        st.stop() 
         
     # Double-check the historical chart data structure exists as well
     if not history_data or "historical" not in history_data:
