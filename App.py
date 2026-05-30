@@ -4,8 +4,8 @@ import pandas as pd
 
 # Set up a wide layout for a clean dashboard view
 st.set_page_config(layout="wide")
-st.title("📊 Enterprise Analytics & Growth Dashboard")
-st.write("Real-time pricing, macro stakeholder tables, and dynamic timeline performance tracking.")
+st.title("📊 Enterprise Analytics & Cached Dashboard")
+st.write("Optimized to preserve your free Alpha Vantage API call limits using memory caching.")
 
 # Setup Input Fields for Ticker and API Key
 col_input1, col_input2 = st.columns([1, 2])
@@ -15,39 +15,44 @@ with col_input1:
 with col_input2:
     api_key = st.text_input("Enter Alpha Vantage API Key:", type="password")
 
-# Run the data engine only if both fields are valid
+# --- NEW: Cached Data Fetcher Engine ---
+# ttl=3600 means the app remembers data for 1 hour before asking Alpha Vantage again
+@st.cache_data(ttl=3600, show_spinner="Fetching financial datasets from server...")
+def fetch_stock_data(ticker, key):
+    overview_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={key}"
+    quote_url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
+    history_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=full&apikey={key}"
+    
+    # Run the raw server queries
+    o_res = requests.get(overview_url).json()
+    q_res = requests.get(quote_url).json()
+    h_res = requests.get(history_url).json()
+    
+    return o_res, q_res, h_res
+
+# Run the cached engine only if parameters are typed out
 if selected_ticker and api_key:
     
-    # Endpoints required for Profile, Quote, and Time-Series Data Pipelines
-    overview_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={selected_ticker}&apikey={api_key}"
-    quote_url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={selected_ticker}&apikey={api_key}"
-    history_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={selected_ticker}&outputsize=full&apikey={api_key}"
+    # Call our cached function
+    overview_res, quote_res, history_res = fetch_stock_data(selected_ticker, api_key)
     
-    try:
-        overview_res = requests.get(overview_url).json()
-        quote_res = requests.get(quote_url).json()
-        history_res = requests.get(history_url).json()
-        
-        # Guard rails for Alpha Vantage API Rate Limiting Blocks
-        if "Note" in overview_res or "Note" in quote_res or "Note" in history_res:
-            st.warning("⚠️ API Call ceiling reached. Free tier keys permit up to 25 calls total daily. Please wait 60 seconds and refresh.")
-            st.stop()
-            
-        if not overview_res or "Name" not in overview_res:
-            st.error(f"Could not load an asset profile for '{selected_ticker}'. Check the spelling or your API authorization.")
-            st.stop()
-            
-        # Core Content Extractions
-        company_name = overview_res.get("Name", selected_ticker)
-        summary = overview_res.get("Description", "No description available.")
-        target_price = overview_res.get("AnalystTargetPrice", "N/A")
-        
-        quote_data = quote_res.get("Global Quote", {})
-        current_price = quote_data.get("05. price", "N/A")
-        
-    except Exception as e:
-        st.error("Connection drops or structural error processing live financial nodes.")
+    # Check if any request returned a throttle notice or api limit message
+    if "Note" in overview_res or "Note" in quote_res or "Note" in history_res:
+        st.error("⚠️ Alpha Vantage API Rate limit reached (5 calls/min, 25 calls/day). Please wait 60 seconds or try again later.")
+        st.info("💡 Tip: Because we added caching, checking the same stock again will not count against your API limit!")
         st.stop()
+        
+    if not overview_res or "Name" not in overview_res:
+        st.error(f"Could not load an asset profile for '{selected_ticker}'. Check the spelling or your API authorization.")
+        st.stop()
+        
+    # Core Content Extractions
+    company_name = overview_res.get("Name", selected_ticker)
+    summary = overview_res.get("Description", "No description available.")
+    target_price = overview_res.get("AnalystTargetPrice", "N/A")
+    
+    quote_data = quote_res.get("Global Quote", {})
+    current_price = quote_data.get("05. price", "N/A")
 
     # --- Profile layout Header Blocks ---
     col1, col2 = st.columns([2, 1])
@@ -62,26 +67,22 @@ if selected_ticker and api_key:
         
     st.markdown("---")
 
-    # --- NEW: Timeline Performance Tracking Charts ---
+    # --- Timeline Performance Tracking Charts ---
     st.subheader("📈 Historical Growth Performance Tracking")
     
     time_series_key = "Time Series (Daily)"
     if time_series_key in history_res:
-        # Convert Alpha Vantage time series JSON nested object into a clean pandas dataframe
         raw_prices = history_res[time_series_key]
         price_df = pd.DataFrame.from_dict(raw_prices, orient='index')
         
-        # Format index column into actual Date formats and Close column to numeric floats
         price_df.index = pd.to_datetime(price_df.index)
         price_df = price_df.rename(columns={"4. close": "Close Price"})
         price_df["Close Price"] = pd.to_numeric(price_df["Close Price"])
-        price_df = price_df.sort_index(ascending=True) # Sort oldest to newest for linear charting
+        price_df = price_df.sort_index(ascending=True)
         
-        # Tabs system layout for filtering historical datasets
         tab1, tab2, tab3 = st.tabs(["1 Week Growth", "1 Month Growth", "Maximum Growth History"])
         
         with tab1:
-            # Filter rows matching trailing 7 calendar days
             week_df = price_df.tail(7)
             if not week_df.empty:
                 first_val = week_df["Close Price"].iloc[0]
@@ -91,7 +92,6 @@ if selected_ticker and api_key:
                 st.line_chart(week_df["Close Price"])
                 
         with tab2:
-            # Filter rows matching trailing 30 calendar days
             month_df = price_df.tail(30)
             if not month_df.empty:
                 m_first_val = month_df["Close Price"].iloc[0]
@@ -101,7 +101,6 @@ if selected_ticker and api_key:
                 st.line_chart(month_df["Close Price"])
                 
         with tab3:
-            # All available data points retrieved from structural response
             if not price_df.empty:
                 max_first_val = price_df["Close Price"].iloc[0]
                 max_last_val = price_df["Close Price"].iloc[-1]
@@ -116,7 +115,6 @@ if selected_ticker and api_key:
     # --- Top Investors & Major Asset Ownership Metrics ---
     st.subheader("🐋 Major Stakeholder & Corporate Ownership Breakdown")
     try:
-        # Pull institutional allocations directly out of overview mapping payload
         inst_shares = overview_res.get("PercentInstitutions", "N/A")
         insider_shares = overview_res.get("PercentInsiders", "N/A")
         
