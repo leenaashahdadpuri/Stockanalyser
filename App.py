@@ -4,107 +4,134 @@ import pandas as pd
 
 # Set up a wide layout for a clean dashboard view
 st.set_page_config(layout="wide")
-st.title("📊 Reliable Wall Street Analyst Dashboard")
-st.write("Powered by Alpha Vantage API (Bypasses Yahoo Cloud Blocking Blocks)")
+st.title("📊 Enterprise Analytics & Growth Dashboard")
+st.write("Real-time pricing, macro stakeholder tables, and dynamic timeline performance tracking.")
 
-# 1. Setup Input Fields for Ticker and API Key
+# Setup Input Fields for Ticker and API Key
 col_input1, col_input2 = st.columns([1, 2])
 with col_input1:
     user_input = st.text_input("Enter Stock Ticker:", "NVDA")
     selected_ticker = user_input.strip().upper()
 with col_input2:
-    # It's best practice to put your key here so the cloud doesn't block you
     api_key = st.text_input("Enter Alpha Vantage API Key:", type="password")
 
-# Run only if the ticker and API key are provided
+# Run the data engine only if both fields are valid
 if selected_ticker and api_key:
     
-    # URL 1: Fetch Company Overview & Fundamentals
+    # Endpoints required for Profile, Quote, and Time-Series Data Pipelines
     overview_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={selected_ticker}&apikey={api_key}"
-    
-    # URL 2: Fetch Current Stock Price Quote
     quote_url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={selected_ticker}&apikey={api_key}"
+    history_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={selected_ticker}&outputsize=full&apikey={api_key}"
     
     try:
         overview_res = requests.get(overview_url).json()
         quote_res = requests.get(quote_url).json()
+        history_res = requests.get(history_url).json()
         
-        # Check if the API returned an error or an empty note
-        if "Note" in overview_res or "Note" in quote_res:
-            st.warning("⚠️ Standard API Rate limit reached (Max 5 requests per minute). Please wait 60 seconds and try again.")
+        # Guard rails for Alpha Vantage API Rate Limiting Blocks
+        if "Note" in overview_res or "Note" in quote_res or "Note" in history_res:
+            st.warning("⚠️ API Call ceiling reached. Free tier keys permit up to 25 calls total daily. Please wait 60 seconds and refresh.")
             st.stop()
             
         if not overview_res or "Name" not in overview_res:
-            st.error(f"Could not find data for '{selected_ticker}'. Please verify the ticker or your API key.")
+            st.error(f"Could not load an asset profile for '{selected_ticker}'. Check the spelling or your API authorization.")
             st.stop()
             
-        # Extract Variables from JSON response safely
+        # Core Content Extractions
         company_name = overview_res.get("Name", selected_ticker)
         summary = overview_res.get("Description", "No description available.")
-        analyst_rating = overview_res.get("AnalystRatingStrongBuy", "N/A") # Alternative sentiment tracker
         target_price = overview_res.get("AnalystTargetPrice", "N/A")
         
-        # Extract current price safely from the Quote API response dictionary
         quote_data = quote_res.get("Global Quote", {})
         current_price = quote_data.get("05. price", "N/A")
         
     except Exception as e:
-        st.error("Error communicating with the data servers. Please verify your connection setup.")
+        st.error("Connection drops or structural error processing live financial nodes.")
         st.stop()
 
-    # Split display content into layout columns
+    # --- Profile layout Header Blocks ---
     col1, col2 = st.columns([2, 1])
-    
     with col1:
         st.header(f"{company_name} ({selected_ticker})")
-        st.subheader("🏢 What the Company Does")
+        st.subheader("🏢 Company Summary")
         st.write(summary)
-        
     with col2:
-        st.subheader("📈 Analyst Recommendation")
-        st.metric(label="Analyst Target Price", value=f"${target_price}" if target_price != "N/A" else "N/A")
-        st.metric(label="Current Stock Price", value=f"${float(current_price):.2f}" if current_price != "N/A" else "N/A")
+        st.subheader("📈 Core Pricing Information")
+        st.metric(label="Current Rate / Share Price", value=f"${float(current_price):.2f}" if current_price != "N/A" else "N/A")
+        st.metric(label="Wall Street Target Mean", value=f"${target_price}" if target_price != "N/A" else "N/A")
         
     st.markdown("---")
+
+    # --- NEW: Timeline Performance Tracking Charts ---
+    st.subheader("📈 Historical Growth Performance Tracking")
     
-    # --- Wall Street Valuation & Growth Metrics ---
-    st.subheader("📊 Fundamental Valuation Breakdown")
-    try:
-        valuation_data = {
-            "PE Ratio": [overview_res.get("PERatio", "N/A")],
-            "PEG Ratio": [overview_res.get("PEGRatio", "N/A")],
-            "Price To Book Ratio": [overview_res.get("PriceToBookRatio", "N/A")],
-            "EV To Revenue": [overview_res.get("EVToRevenue", "N/A")],
-            "52 Week High": [f"${overview_res.get('52WeekHigh', 'N/A')}"],
-            "52 Week Low": [f"${overview_res.get('52WeekLow', 'N/A')}"]
-        }
+    time_series_key = "Time Series (Daily)"
+    if time_series_key in history_res:
+        # Convert Alpha Vantage time series JSON nested object into a clean pandas dataframe
+        raw_prices = history_res[time_series_key]
+        price_df = pd.DataFrame.from_dict(raw_prices, orient='index')
         
-        val_df = pd.DataFrame(valuation_data)
-        st.dataframe(val_df, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.write("Valuation breakdown metrics are currently unavailable.")
+        # Format index column into actual Date formats and Close column to numeric floats
+        price_df.index = pd.to_datetime(price_df.index)
+        price_df = price_df.rename(columns={"4. close": "Close Price"})
+        price_df["Close Price"] = pd.to_numeric(price_df["Close Price"])
+        price_df = price_df.sort_index(ascending=True) # Sort oldest to newest for linear charting
+        
+        # Tabs system layout for filtering historical datasets
+        tab1, tab2, tab3 = st.tabs(["1 Week Growth", "1 Month Growth", "Maximum Growth History"])
+        
+        with tab1:
+            # Filter rows matching trailing 7 calendar days
+            week_df = price_df.tail(7)
+            if not week_df.empty:
+                first_val = week_df["Close Price"].iloc[0]
+                last_val = week_df["Close Price"].iloc[-1]
+                w_growth = ((last_val - first_val) / first_val) * 100
+                st.metric("1-Week Performance Trend", f"{w_growth:+.2f}%")
+                st.line_chart(week_df["Close Price"])
+                
+        with tab2:
+            # Filter rows matching trailing 30 calendar days
+            month_df = price_df.tail(30)
+            if not month_df.empty:
+                m_first_val = month_df["Close Price"].iloc[0]
+                m_last_val = month_df["Close Price"].iloc[-1]
+                m_growth = ((m_last_val - m_first_val) / m_first_val) * 100
+                st.metric("1-Month Performance Trend", f"{m_growth:+.2f}%")
+                st.line_chart(month_df["Close Price"])
+                
+        with tab3:
+            # All available data points retrieved from structural response
+            if not price_df.empty:
+                max_first_val = price_df["Close Price"].iloc[0]
+                max_last_val = price_df["Close Price"].iloc[-1]
+                max_growth = ((max_last_val - max_first_val) / max_first_val) * 100
+                st.metric("All-Time Historical Performance Trend", f"{max_growth:+.2f}%")
+                st.line_chart(price_df["Close Price"])
+    else:
+        st.info("Historical line aggregation maps are temporarily fetching blank rows or throttling limits.")
 
     st.markdown("---")
     
-    # --- Major Institutional & Stakeholder Metrics ---
-    st.subheader("🐋 Major Stakeholder Allocation Overview")
+    # --- Top Investors & Major Asset Ownership Metrics ---
+    st.subheader("🐋 Major Stakeholder & Corporate Ownership Breakdown")
     try:
-        # Alpha Vantage separates ownership values cleanly in the overview dictionary
+        # Pull institutional allocations directly out of overview mapping payload
         inst_shares = overview_res.get("PercentInstitutions", "N/A")
         insider_shares = overview_res.get("PercentInsiders", "N/A")
         
         ownership_data = {
-            "Institutions Holding Shares": [f"{inst_shares}%" if inst_shares != "N/A" else "N/A"],
-            "Insiders Holding Shares": [f"{insider_shares}%" if insider_shares != "N/A" else "N/A"],
-            "Quarterly Earnings Growth (YOY)": [f"{overview_res.get('QuarterlyEarningsGrowthYOY', 'N/A')}%"],
-            "Quarterly Revenue Growth (YOY)": [f"{overview_res.get('QuarterlyRevenueGrowthYOY', 'N/A')}%"]
+            "Top Institutional Investor Allocation %": [f"{inst_shares}%" if inst_shares != "N/A" else "N/A"],
+            "Corporate Insider Allocation %": [f"{insider_shares}%" if insider_shares != "N/A" else "N/A"],
+            "Revenue Growth Metrics (Quarterly YOY)": [f"{overview_res.get('QuarterlyRevenueGrowthYOY', 'N/A')}%"],
+            "Net Profit Margins (Trailing Twelve Months)": [f"{overview_res.get('ProfitMargin', 'N/A')}%"]
         }
         
         ownership_df = pd.DataFrame(ownership_data)
         st.dataframe(ownership_df, use_container_width=True, hide_index=True)
         
     except Exception as e:
-        st.write("Ownership allocation statistics are currently unavailable.")
+        st.write("Ownership allocation metrics are currently experiencing connection drops.")
         
 elif not api_key:
-    st.info("🔑 Please enter your Alpha Vantage API key in the input box above to load stock metrics safely.")
+    st.info("🔑 Please enter your Alpha Vantage API key in the password input field above to query live analytical records.")
