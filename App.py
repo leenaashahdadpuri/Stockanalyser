@@ -67,4 +67,75 @@ if selected_ticker and api_key:
     with col2:
         st.subheader("📈 Core Pricing Information")
         st.metric(label="Current Rate / Share Price", value=f"${current_price:,.2f}")
-        if target_price != "N
+        if target_price != "N/A" and target_price is not None:
+            st.metric(label="Wall Street Target Mean", value=f"${float(target_price):,.2f}")
+        else:
+            st.metric(label="Wall Street Target Mean", value="N/A")
+            
+    st.markdown("---")
+    
+    # --- Timeline Performance Charts ---
+    st.subheader("📈 Historical Growth Performance Tracking")
+    
+    if history_data and "historical" in history_data:
+        raw_history = history_data["historical"]
+        
+        # Turn historical array into a mapped pandas dataframe
+        price_df = pd.DataFrame(raw_history)
+        price_df["date"] = pd.to_datetime(price_df["date"])
+        price_df = price_df.set_index("date")
+        price_df = price_df.rename(columns={"close": "Close Price"})
+        price_df = price_df.sort_index(ascending=True) # Sort chronological
+        
+        tab1, tab2, tab3 = st.tabs(["1 Week Growth", "1 Month Growth", "Maximum Growth History"])
+        
+        with tab1:
+            week_df = price_df.tail(7)
+            if not week_df.empty:
+                first_val = week_df["Close Price"].iloc[0]
+                last_val = week_df["Close Price"].iloc[-1]
+                w_growth = ((last_val - first_val) / first_val) * 100
+                st.metric("1-Week Performance Trend", f"{w_growth:+.2f}%")
+                st.line_chart(week_df["Close Price"])
+                
+        with tab2:
+            month_df = price_df.tail(30)
+            if not month_df.empty:
+                m_first_val = month_df["Close Price"].iloc[0]
+                m_last_val = month_df["Close Price"].iloc[-1]
+                m_growth = ((m_last_val - m_first_val) / m_first_val) * 100
+                st.metric("1-Month Performance Trend", f"{m_growth:+.2f}%")
+                st.line_chart(month_df["Close Price"])
+                
+        with tab3:
+            if not price_df.empty:
+                max_first_val = price_df["Close Price"].iloc[0]
+                max_last_val = price_df["Close Price"].iloc[-1]
+                max_growth = ((max_last_val - max_first_val) / max_first_val) * 100
+                st.metric("All-Time Historical Performance Trend", f"{max_growth:+.2f}%")
+                st.line_chart(price_df["Close Price"])
+    else:
+        st.info("Historical tracking maps are temporarily unavailable due to API formatting limitations.")
+
+    st.markdown("---")
+    
+    # --- Fundamental & Sector Metadata Metrics ---
+    st.subheader("🐋 Major Stakeholder & Corporate Ownership Breakdown")
+    
+    mkt_cap = profile.get("mcap", "N/A")
+    beta = profile.get("beta", "N/A")
+    industry = profile.get("industry", "N/A")
+    sector = profile.get("sector", "N/A")
+    
+    ownership_data = {
+        "Market Capitalization": [f"${mkt_cap:,}" if isinstance(mkt_cap, (int, float)) else "N/A"],
+        "Beta Volatility (Vs S&P 500)": [beta],
+        "Primary Core Industry Segment": [industry],
+        "Macro Sector Group": [sector]
+    }
+    
+    ownership_df = pd.DataFrame(ownership_data)
+    st.dataframe(ownership_df, use_container_width=True, hide_index=True)
+    
+elif not api_key:
+    st.info("🔑 Please enter your FinancialModelingPrep (FMP) API key above to load safe, high-capacity stock records instantly.")
