@@ -4,8 +4,8 @@ import pandas as pd
 
 # Set up a wide layout for a clean dashboard view
 st.set_page_config(layout="wide")
-st.title("📊 Enterprise Analytics & Cached Dashboard")
-st.write("Optimized to preserve your free Alpha Vantage API call limits using memory caching.")
+st.title("📊 Enterprise Analytics & Growth Dashboard")
+st.write("Powered by FMP API (Up to 250 free daily queries to prevent rate limits)")
 
 # Setup Input Fields for Ticker and API Key
 col_input1, col_input2 = st.columns([1, 2])
@@ -13,48 +13,40 @@ with col_input1:
     user_input = st.text_input("Enter Stock Ticker:", "NVDA")
     selected_ticker = user_input.strip().upper()
 with col_input2:
-    api_key = st.text_input("Enter Alpha Vantage API Key:", type="password")
+    api_key = st.text_input("Enter FinancialModelingPrep (FMP) API Key:", type="password")
 
-# --- NEW: Cached Data Fetcher Engine ---
-# ttl=3600 means the app remembers data for 1 hour before asking Alpha Vantage again
-@st.cache_data(ttl=3600, show_spinner="Fetching financial datasets from server...")
-def fetch_stock_data(ticker, key):
-    overview_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={key}"
-    quote_url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
-    history_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=full&apikey={key}"
+# Cached Data Function to save your API keys and calls in local browser memory
+@st.cache_data(ttl=1800, show_spinner="Loading global financial metrics...")
+def fetch_fmp_data(ticker, key):
+    # Endpoint 1: Profile contains descriptions, price, margins, and institutional stakes
+    profile_url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={key}"
+    # Endpoint 2: Core historical daily pricing back to inception
+    history_url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?serietype=line&apikey={key}"
     
-    # Run the raw server queries
-    o_res = requests.get(overview_url).json()
-    q_res = requests.get(quote_url).json()
-    h_res = requests.get(history_url).json()
-    
-    return o_res, q_res, h_res
+    try:
+        p_res = requests.get(profile_url).json()
+        h_res = requests.get(history_url).json()
+        return p_res, h_res
+    except:
+        return None, None
 
-# Run the cached engine only if parameters are typed out
+# Run data engine only if input variables exist
 if selected_ticker and api_key:
+    profile_data, history_data = fetch_fmp_data(selected_ticker, api_key)
     
-    # Call our cached function
-    overview_res, quote_res, history_res = fetch_stock_data(selected_ticker, api_key)
-    
-    # Check if any request returned a throttle notice or api limit message
-    if "Note" in overview_res or "Note" in quote_res or "Note" in history_res:
-        st.error("⚠️ Alpha Vantage API Rate limit reached (5 calls/min, 25 calls/day). Please wait 60 seconds or try again later.")
-        st.info("💡 Tip: Because we added caching, checking the same stock again will not count against your API limit!")
+    # Error state handlers if API limits drop out or key is mistyped
+    if not profile_data or len(profile_data) == 0:
+        st.error("⚠️ Error pulling records. Please verify your FMP API Key or check if you typed the stock ticker correctly.")
         st.stop()
         
-    if not overview_res or "Name" not in overview_res:
-        st.error(f"Could not load an asset profile for '{selected_ticker}'. Check the spelling or your API authorization.")
-        st.stop()
-        
-    # Core Content Extractions
-    company_name = overview_res.get("Name", selected_ticker)
-    summary = overview_res.get("Description", "No description available.")
-    target_price = overview_res.get("AnalystTargetPrice", "N/A")
+    # Extract structural items cleanly
+    profile = profile_data[0]
+    company_name = profile.get("companyName", selected_ticker)
+    summary = profile.get("description", "No description available.")
+    current_price = profile.get("price", 0.0)
+    target_price = profile.get("priceTarget", "N/A")
     
-    quote_data = quote_res.get("Global Quote", {})
-    current_price = quote_data.get("05. price", "N/A")
-
-    # --- Profile layout Header Blocks ---
+    # Display Core Profile Data Layout
     col1, col2 = st.columns([2, 1])
     with col1:
         st.header(f"{company_name} ({selected_ticker})")
@@ -62,23 +54,26 @@ if selected_ticker and api_key:
         st.write(summary)
     with col2:
         st.subheader("📈 Core Pricing Information")
-        st.metric(label="Current Rate / Share Price", value=f"${float(current_price):.2f}" if current_price != "N/A" else "N/A")
-        st.metric(label="Wall Street Target Mean", value=f"${target_price}" if target_price != "N/A" else "N/A")
-        
+        st.metric(label="Current Rate / Share Price", value=f"${current_price:,.2f}")
+        if target_price != "N/A" and target_price is not None:
+            st.metric(label="Wall Street Target Mean", value=f"${float(target_price):,.2f}")
+        else:
+            st.metric(label="Wall Street Target Mean", value="N/A")
+            
     st.markdown("---")
-
-    # --- Timeline Performance Tracking Charts ---
+    
+    # --- Timeline Performance Charts ---
     st.subheader("📈 Historical Growth Performance Tracking")
     
-    time_series_key = "Time Series (Daily)"
-    if time_series_key in history_res:
-        raw_prices = history_res[time_series_key]
-        price_df = pd.DataFrame.from_dict(raw_prices, orient='index')
+    if history_data and "historical" in history_data:
+        raw_history = history_data["historical"]
         
-        price_df.index = pd.to_datetime(price_df.index)
-        price_df = price_df.rename(columns={"4. close": "Close Price"})
-        price_df["Close Price"] = pd.to_numeric(price_df["Close Price"])
-        price_df = price_df.sort_index(ascending=True)
+        # Turn historical array into a mapped pandas dataframe
+        price_df = pd.DataFrame(raw_history)
+        price_df["date"] = pd.to_datetime(price_df["date"])
+        price_df = price_df.set_index("date")
+        price_df = price_df.rename(columns={"close": "Close Price"})
+        price_df = price_df.sort_index(ascending=True) # Sort chronological
         
         tab1, tab2, tab3 = st.tabs(["1 Week Growth", "1 Month Growth", "Maximum Growth History"])
         
@@ -108,28 +103,28 @@ if selected_ticker and api_key:
                 st.metric("All-Time Historical Performance Trend", f"{max_growth:+.2f}%")
                 st.line_chart(price_df["Close Price"])
     else:
-        st.info("Historical line aggregation maps are temporarily fetching blank rows or throttling limits.")
+        st.info("Historical tracking maps are temporarily unavailable due to API formatting limitations.")
 
     st.markdown("---")
     
     # --- Top Investors & Major Asset Ownership Metrics ---
     st.subheader("🐋 Major Stakeholder & Corporate Ownership Breakdown")
-    try:
-        inst_shares = overview_res.get("PercentInstitutions", "N/A")
-        insider_shares = overview_res.get("PercentInsiders", "N/A")
-        
-        ownership_data = {
-            "Top Institutional Investor Allocation %": [f"{inst_shares}%" if inst_shares != "N/A" else "N/A"],
-            "Corporate Insider Allocation %": [f"{insider_shares}%" if insider_shares != "N/A" else "N/A"],
-            "Revenue Growth Metrics (Quarterly YOY)": [f"{overview_res.get('QuarterlyRevenueGrowthYOY', 'N/A')}%"],
-            "Net Profit Margins (Trailing Twelve Months)": [f"{overview_res.get('ProfitMargin', 'N/A')}%"]
-        }
-        
-        ownership_df = pd.DataFrame(ownership_data)
-        st.dataframe(ownership_df, use_container_width=True, hide_index=True)
-        
-    except Exception as e:
-        st.write("Ownership allocation metrics are currently experiencing connection drops.")
-        
+    
+    # FMP packages beta scores, margins, and industry classifications inside profile
+    mkt_cap = profile.get("mcap", "N/A")
+    beta = profile.get("beta", "N/A")
+    industry = profile.get("industry", "N/A")
+    sector = profile.get("sector", "N/A")
+    
+    ownership_data = {
+        "Market Capitalization": [f"${mkt_cap:,}" if isinstance(mkt_cap, (int, float)) else "N/A"],
+        "Beta Volatility (Vs S&P 500)": [beta],
+        "Primary Core Industry Segment": [industry],
+        "Macro Sector Group": [sector]
+    }
+    
+    ownership_df = pd.DataFrame(ownership_data)
+    st.dataframe(ownership_df, use_container_width=True, hide_index=True)
+    
 elif not api_key:
-    st.info("🔑 Please enter your Alpha Vantage API key in the password input field above to query live analytical records.")
+    st.info("🔑 Please enter your FinancialModelingPrep (FMP) API key above to load safe, high-capacity stock records instantly.")
