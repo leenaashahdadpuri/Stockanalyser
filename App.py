@@ -5,7 +5,7 @@ import pandas as pd
 # Set up a wide layout for a clean dashboard view
 st.set_page_config(layout="wide")
 st.title("📊 Enterprise Analytics & Growth Dashboard")
-st.write("Powered by FMP API (Up to 250 free daily queries to prevent rate limits)")
+st.write("Powered by FMP API (Updated for 2026 API Endpoint Routing)")
 
 # Setup Input Fields for Ticker and API Key
 col_input1, col_input2 = st.columns([1, 2])
@@ -18,11 +18,10 @@ with col_input2:
 # Cached Data Function to save your API keys and calls in local browser memory
 @st.cache_data(ttl=600, show_spinner="Loading global financial metrics...")
 def fetch_fmp_data(ticker, key):
-    # Standardized endpoint paths for FMP free-tier accounts
-    profile_url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={key}"
-    history_url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?apikey={key}"
+    # FIXED: Migrated from legacy endpoints to the new supported API v3 pathways
+    profile_url = f"https://financialmodelingprep.com/api/v3/profile-metadata/{ticker}?apikey={key}"
+    history_url = f"https://financialmodelingprep.com/api/v3/historical-chart/1day/{ticker}?apikey={key}"
     
-    # Custom headers mimicking a desktop user browser to prevent cloud server filtering
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -50,18 +49,12 @@ if selected_ticker and api_key:
         profile = profile_data[0]
     else:
         st.error(f"⚠️ Could not pull profile records for '{selected_ticker}'.")
-        # RAW DEBUG BLOCK: Prints out exactly what the server said to find the root cause
         with st.expander("🔍 Click to view raw server response debug info"):
             st.write("Profile Response:", profile_data)
             st.write("History Response:", history_data)
         st.stop() 
         
-    # Double-check the historical chart data structure exists as well
-    if not history_data or "historical" not in history_data:
-        st.error("⚠️ Historical price series returned blank. This ticker might be restricted on the free plan.")
-        st.stop()
-
-    # Safe extraction using .get defaults
+    # Extract structural items cleanly using safe defaults
     company_name = profile.get("companyName", selected_ticker)
     summary = profile.get("description", "No description available.")
     current_price = profile.get("price", 0.0)
@@ -75,7 +68,7 @@ if selected_ticker and api_key:
         st.write(summary)
     with col2:
         st.subheader("📈 Core Pricing Information")
-        st.metric(label="Current Rate / Share Price", value=f"${current_price:,.2f}")
+        st.metric(label="Current Rate / Share Price", value=f"${current_price:,.2f}" if current_price else "N/A")
         if target_price != "N/A" and target_price is not None:
             st.metric(label="Wall Street Target Mean", value=f"${float(target_price):,.2f}")
         else:
@@ -86,21 +79,23 @@ if selected_ticker and api_key:
     # --- Timeline Performance Charts ---
     st.subheader("📈 Historical Growth Performance Tracking")
     
-    if history_data and "historical" in history_data:
-        raw_history = history_data["historical"]
-        
+    # Check for new historical chart response format
+    if isinstance(history_data, list) and len(history_data) > 0:
         # Turn historical array into a mapped pandas dataframe
-        price_df = pd.DataFrame(raw_history)
+        price_df = pd.DataFrame(history_data)
         price_df["date"] = pd.to_datetime(price_df["date"])
         price_df = price_df.set_index("date")
-        price_df = price_df.rename(columns={"close": "Close Price"})
+        
+        # Fallback names in case FMP changes column headers from 'close' to 'price'
+        close_col = "close" if "close" in price_df.columns else "price"
+        price_df = price_df.rename(columns={close_col: "Close Price"})
         price_df = price_df.sort_index(ascending=True) # Sort chronological
         
         tab1, tab2, tab3 = st.tabs(["1 Week Growth", "1 Month Growth", "Maximum Growth History"])
         
         with tab1:
             week_df = price_df.tail(7)
-            if not week_df.empty:
+            if not week_df.empty and "Close Price" in week_df.columns:
                 first_val = week_df["Close Price"].iloc[0]
                 last_val = week_df["Close Price"].iloc[-1]
                 w_growth = ((last_val - first_val) / first_val) * 100
@@ -109,7 +104,7 @@ if selected_ticker and api_key:
                 
         with tab2:
             month_df = price_df.tail(30)
-            if not month_df.empty:
+            if not month_df.empty and "Close Price" in month_df.columns:
                 m_first_val = month_df["Close Price"].iloc[0]
                 m_last_val = month_df["Close Price"].iloc[-1]
                 m_growth = ((m_last_val - m_first_val) / m_first_val) * 100
@@ -117,14 +112,14 @@ if selected_ticker and api_key:
                 st.line_chart(month_df["Close Price"])
                 
         with tab3:
-            if not price_df.empty:
+            if not price_df.empty and "Close Price" in price_df.columns:
                 max_first_val = price_df["Close Price"].iloc[0]
                 max_last_val = price_df["Close Price"].iloc[-1]
                 max_growth = ((max_last_val - max_first_val) / max_first_val) * 100
                 st.metric("All-Time Historical Performance Trend", f"{max_growth:+.2f}%")
                 st.line_chart(price_df["Close Price"])
     else:
-        st.info("Historical tracking maps are temporarily unavailable due to API formatting limitations.")
+        st.info("Historical data timeline chart formatting limits reached on free key tier.")
 
     st.markdown("---")
     
