@@ -7,11 +7,8 @@ st.set_page_config(layout="wide")
 st.title("📊 Custom Wall Street Analyst Dashboard")
 st.write("Type any US stock ticker below to pull real-time data, company info, and market consensus.")
 
-# 1. TEXT INPUT FIELD (Replaced the drop-down menu)
-# Initializes with "NVDA" as the default placeholder value
+# 1. TEXT INPUT FIELD
 user_input = st.text_input("Enter Stock Ticker:", "NVDA")
-
-# .strip().upper() ensures " tsla " or "aapl" format perfectly to "TSLA" or "AAPL"
 selected_ticker = user_input.strip().upper()
 
 # Run the data pipeline only if the text field isn't empty
@@ -74,16 +71,39 @@ if selected_ticker:
     # --- Institutional & Insider Ownership Breakdown ---
     st.subheader("🐋 Institutional & Insider Ownership")
     try:
-        # Pull ownership stakes safely from the working .info dataset
+        # Pull raw data values safely
         inst_pct = info.get('heldPercentInstitutions')
         insider_pct = info.get('heldPercentInsiders')
+        short_shares = info.get('sharesShort')
         
-        # Format percentages safely in case values are None
-        inst_str = f"{round(inst_pct * 100, 2)}%" if inst_pct is not None else "N/A"
-        insider_str = f"{round(insider_pct * 100, 2)}%" if insider_pct is not None else "N/A"
-        
+        # Convert values to strings safely outside of the dictionary structure
+        if inst_pct is not None:
+            inst_str = f"{round(inst_pct * 100, 2)}%"
+        else:
+            inst_str = "N/A"
+            
+        if insider_pct is not None:
+            insider_str = f"{round(insider_pct * 100, 2)}%"
+        else:
+            insider_str = "N/A"
+            
+        if isinstance(short_shares, (int, float)):
+            short_str = f"{short_shares:,}"
+        else:
+            short_str = "N/A"
+
+        # Construct ownership dictionary cleanly
         ownership_data = {
             "Institutions Holding Shares": [inst_str],
             "Insiders Holding Shares": [insider_str],
-            "Shares Short (Current Month)": [f"{info.get('sharesShort', 'N/A'):,}" if isinstance(info.get('sharesShort'), (int, float)) else "N/A"],
-            "Short Ratio (Days to Cover)":
+            "Shares Short (Current Month)": [short_str],
+            "Short Ratio (Days to Cover)": [info.get('shortRatio', 'N/A')]
+        }
+        
+        ownership_df = pd.DataFrame(ownership_data)
+        st.dataframe(ownership_df, use_container_width=True, hide_index=True)
+        
+    except Exception as e:
+        st.write("Ownership and investor breakdown is temporarily unavailable.")
+else:
+    st.info("Please enter a stock ticker above to get started.")
